@@ -6,9 +6,14 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.InputMethodManager
 
 class AntiTokAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
+    private val inputMethodManager by lazy {
+        getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+    }
     private val foregroundWatchdogRunnable = object : Runnable {
         override fun run() {
             checkForegroundPackage()
@@ -24,6 +29,8 @@ class AntiTokAccessibilityService : AccessibilityService() {
             AntiTokSettings.isWithinActiveWindow(this)
         ) {
             if (rootInActiveWindow?.packageName?.toString() !in tikTokPackages) {
+                timeoutPending = true
+            } else if (isInputMethodVisible()) {
                 timeoutPending = true
             } else {
                 executeTimeoutAction()
@@ -95,7 +102,11 @@ class AntiTokAccessibilityService : AccessibilityService() {
             }
             if (!sessionActive) startTikTokSession()
             if (timeoutPending && sessionActive && !promptShowing) {
-                executeTimeoutAction()
+                if (isInputMethodVisible()) {
+                    timeoutPending = true
+                } else {
+                    executeTimeoutAction()
+                }
             }
             return
         }
@@ -147,6 +158,10 @@ class AntiTokAccessibilityService : AccessibilityService() {
         val packageName = rootInActiveWindow?.packageName?.toString()
         if (packageName == null) {
             if (!sessionActive) return
+            if (isInputMethodVisible()) {
+                missingForegroundChecks = 0
+                return
+            }
             if (isTikTokSessionRecentlyVisible()) {
                 missingForegroundChecks = 0
                 return
@@ -176,7 +191,13 @@ class AntiTokAccessibilityService : AccessibilityService() {
             return
         }
         if (packageName in tikTokPackages) {
-            if (timeoutPending) executeTimeoutAction()
+            if (timeoutPending) {
+                if (isInputMethodVisible()) {
+                    timeoutPending = true
+                } else {
+                    executeTimeoutAction()
+                }
+            }
             return
         }
         handleNonTikTokPackage(packageName)
@@ -186,9 +207,22 @@ class AntiTokAccessibilityService : AccessibilityService() {
         if (packageName == ownPackageName() && SystemClock.uptimeMillis() <= ignoreOwnPackageUntil) {
             return
         }
+        if (isInputMethodPackage(packageName)) return
         if (packageName in transientPackages) return
         if (isTikTokSessionRecentlyVisible()) return
         endTikTokSession()
+    }
+
+    private fun isInputMethodVisible(): Boolean =
+        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+
+    private fun isInputMethodPackage(packageName: String): Boolean {
+        if (!isInputMethodVisible()) return false
+        val windowPackages = windows
+            .filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            .mapNotNull { it.root?.packageName?.toString() }
+        return packageName in windowPackages ||
+            inputMethodManager.enabledInputMethodList.any { it.packageName == packageName }
     }
 
     private fun markTikTokSeen() {
@@ -249,7 +283,10 @@ class AntiTokAccessibilityService : AccessibilityService() {
 
     private fun executeTimeoutAction() {
         timeoutPending = false
-        if (rootInActiveWindow?.packageName?.toString() !in tikTokPackages) {
+        if (
+            isInputMethodVisible() ||
+            rootInActiveWindow?.packageName?.toString() !in tikTokPackages
+        ) {
             timeoutPending = true
             return
         }
