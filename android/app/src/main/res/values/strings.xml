@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AntiTok</string>
+    <string name="accessibility_service_description">Отслеживает открытие TikTok и показывает плашки AntiTok.</string>
+    <string name="widget_description">Включает и выключает защиту AntiTok</string>
+    <string name="widget_disabled">Защита AntiTok выключена</string>
+</resources>
